@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet Routing App</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.2.0/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: row;
+        }
+        #map {
+            width: 80%;
+            height: 100vh;
+        }
+        #sidebar {
+            width: 20%;
+            height: 100vh;
+            background-color: #f8f9fa;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        .suggestions {
+            border: 1px solid #ccc;
+            max-height: 100px;
+            overflow-y: auto;
+            display: none;
+            background: white;
+            z-index: 1000;
+        }
+        .suggestion-item {
+            padding: 5px;
+            cursor: pointer;
+        }
+        .suggestion-item:hover {
+            background-color: #eee;
+        }
+        #title {
+            font-size:xx-large;
+            text-align: center;
+            position: absolute;
+            top: 10px;
+            left: 60%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar" class="d-flex flex-column">
+        <h1 class="h3 mb-4">Routing Service</h1>
+        <div class="form-group">
+            <label for="start">Start:</label>
+            <input type="text" id="start" class="form-control" placeholder="Enter start place">
+            <div id="start-suggestions" class="suggestions"></div>
+        </div>
+        <div class="form-group">
+            <label for="end">End:</label>
+            <input type="text" id="end" class="form-control" placeholder="Enter end place">
+            <div id="end-suggestions" class="suggestions"></div>
+        </div>
+        <button class="btn btn-primary" onclick="calculateRoute()">Calculate Route</button>
+        <div id="route-info" class="mt-2"></div>
+    </div>
+    <div id="map"></div>
+    <div id="title">Welcome to Routing Service</div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.2.0/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+        var map = L.map('map').setView([28.7041, 77.1025], 10);
+        var tileLayer = L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', { attribution: 'OSM' }).addTo(map);
+
+        // Marker icon
+        var taxiIcon = L.icon({
+            iconUrl: "car.png",
+            iconSize: [70, 70]
+        });
+
+        // Marker
+        var marker = L.marker([28.7041, 77.1025], { icon: taxiIcon }).addTo(map);
+
+        // Variable to store routing control instance
+        var routingControl = null;
+        // Variable to store the animation timeout ID
+        var animationTimeout = null;
+
+        function geocode(place, callback) {
+            var url = 'https://nominatim.openstreetmap.org/search?format=json&q=' + place;
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        callback(data);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function calculateRoute() {
+            var startPlace = document.getElementById('start').value;
+            var endPlace = document.getElementById('end').value;
+
+            if (startPlace && endPlace) {
+                if (routingControl) {
+                    map.removeControl(routingControl);
+                }
+
+                if (animationTimeout) {
+                    clearTimeout(animationTimeout);
+                    animationTimeout = null;
+                }
+                
+                geocode(startPlace, function(startData) {
+                    var startPoint = L.latLng(startData[0].lat, startData[0].lon);
+                    marker.setLatLng(startPoint); // Move marker to start point
+
+                    geocode(endPlace, function(endData) {
+                        var endPoint = L.latLng(endData[0].lat, endData[0].lon);
+
+                        routingControl = L.Routing.control({
+                            waypoints: [
+                                startPoint,
+                                endPoint
+                            ]
+                        }).addTo(map);
+
+                        routingControl.on('routesfound', function(e) {
+                            var route = e.routes[0];
+                            var travelTime = route.summary.totalTime;
+                            var hours = Math.floor(travelTime / 3600);
+                            var minutes = Math.floor((travelTime % 3600) / 60);
+                            var timeString = (hours > 0 ? hours + " hour(s) " : "") + minutes + " minute(s)";
+
+                            document.getElementById('route-info').innerHTML = `
+                                <p>Estimated travel time: ${timeString}</p>
+                                <p>Distance: ${(route.summary.totalDistance / 1000).toFixed(2)} km</p>
+                            `;
+
+                            animateMarker(route.coordinates);
+                        });
+                    });
+                });
+            } else {
+                alert("Please enter both start and end places.");
+            }
+        }
+
+        function animateMarker(coordinates) {
+            var index = 0;
+            function move() {
+                var nextCoord = coordinates[index];
+                if (!nextCoord) return;
+
+                var nextLatLng = L.latLng(nextCoord.lat, nextCoord.lng);
+
+                marker.setLatLng(nextLatLng);
+                index++;
+
+                animationTimeout = setTimeout(move, 200); // Adjust this value to control the speed
+            }
+            move();
+        }
+
+        function showSuggestions(input, suggestionsDiv) {
+            var place = input.val();
+            if (place.length > 2) {
+                geocode(place, function(data) {
+                    suggestionsDiv.empty();
+                    data.forEach(function(item) {
+                        var suggestionItem = $('<div class="suggestion-item"></div>').text(item.display_name);
+                        suggestionItem.on('click', function() {
+                            input.val(item.display_name);
+                            suggestionsDiv.hide();
+                        });
+                        suggestionsDiv.append(suggestionItem);
+                    });
+                    suggestionsDiv.show();
+                });
+            } else {
+                suggestionsDiv.hide();
+            }
+        }
+
+        $(document).ready(function() {
+            $('#start').on('input', function() {
+                showSuggestions($(this), $('#start-suggestions'));
+            });
+
+            $('#end').on('input', function() {
+                showSuggestions($(this), $('#end-suggestions'));
+            });
+
+            $(document).click(function(event) { 
+                if(!$(event.target).closest('#start-suggestions').length) {
+                    $('#start-suggestions').hide();
+                }        
+                if(!$(event.target).closest('#end-suggestions').length) {
+                    $('#end-suggestions').hide();
+                }        
+            });
+        });
+    </script>
+</body>
+</html>
